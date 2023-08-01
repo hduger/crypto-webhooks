@@ -20,6 +20,31 @@ function postSocketErrorHandler(error) {
     console.log(error);
 }
 
+function sign(str, secret) {
+    const hash = CryptoJS.HmacSHA256(str, secret);
+    return hash.toString();
+}
+
+function timestampAndSign(message, channel, products = []) {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const strToSign = `${timestamp}${channel}${products.join(',')}`;
+    const sig = sign(strToSign, SIGNING_KEY);
+    return { ...message, signature: sig, timestamp: timestamp };
+}
+
+function subscribeToProducts(products, channelName, ws) {
+    const message = {
+        type: 'subscribe',
+        channels: channelName,
+        api_key: API_KEY,
+        product_ids: products,
+    };
+    const subscribeMsg = timestampAndSign(message, channelName, products);
+    ws.send(JSON.stringify(subscribeMsg));
+}
+
+const PRODUCTS = ['BTC-USD'];
+
 const server = app.listen(PORT, () => {
     console.log(`listening on *:${PORT}`);
 });
@@ -40,22 +65,29 @@ wss.on('connection', (ws, req) => {
         wss.clients.forEach((client) => {
             if (ws === client && client.readyState === WebSocket.OPEN) {
                 // client.send(msg, { binary: isBinary });
+
+                // convert message to string
+                let jsonMsg = JSON.stringify(msg);
+                let bufferOriginalMSG = Buffer.from(JSON.parse(jsonMsg).data);
+                console.log(bufferOriginalMSG.toString('utf8'));
+                PRODUCTS.push(bufferOriginalMSG.toString('utf8'));
+
                 // connect to data websocket
                 const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
                 dataSocket.on('open', () => {
                     console.log('opening data server');
-                    dataSocket.send(
-                        JSON.stringify({
-                            type: 'subscribe',
-                            channels: ['ticker'],
-                            product_ids: ['BTC-USD'],
-                        })
-                    );
+                    console.log(PRODUCTS);
+                    subscribeToProducts(PRODUCTS, ['level2'], dataSocket);
                 });
 
                 dataSocket.on('message', (data) => {
+                    // convert data to string
+                    let jsonData = JSON.stringify(data);
+                    let bufferOriginalData = Buffer.from(
+                        JSON.parse(jsonData).data
+                    );
                     console.log('sending data');
-                    client.send(JSON.stringify(data));
+                    client.send(bufferOriginalData.toString('utf8'));
                 });
             }
         });
