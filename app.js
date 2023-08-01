@@ -35,9 +35,9 @@ function timestampAndSign(message, channel, products = []) {
 function subscribeToProducts(products, channelName, ws) {
     const message = {
         type: 'subscribe',
+        product_ids: products,
         channels: channelName,
         api_key: API_KEY,
-        product_ids: products,
     };
     const subscribeMsg = timestampAndSign(message, channelName, products);
     ws.send(JSON.stringify(subscribeMsg));
@@ -77,7 +77,14 @@ wss.on('connection', (ws, req) => {
                 dataSocket.on('open', () => {
                     console.log('opening data server');
                     console.log(PRODUCTS);
-                    subscribeToProducts(PRODUCTS, ['level2'], dataSocket);
+                    // dataSocket.send(
+                    //     JSON.stringify({
+                    //         type: 'subscribe',
+                    //         channels: ['ticker'],
+                    //         product_ids: ['BTC-USD'],
+                    //     })
+                    // );
+                    subscribeToProducts(PRODUCTS, ['ticker'], dataSocket);
                 });
 
                 dataSocket.on('message', (data) => {
@@ -86,8 +93,31 @@ wss.on('connection', (ws, req) => {
                     let bufferOriginalData = Buffer.from(
                         JSON.parse(jsonData).data
                     );
-                    console.log('sending data');
-                    client.send(bufferOriginalData.toString('utf8'));
+                    let objectData = JSON.parse(
+                        bufferOriginalData.toString('utf8')
+                    );
+                    if (objectData.type === 'ticker') {
+                        let newObject = {
+                            product_id: objectData.product_id,
+                            price: objectData.price,
+                            bid: objectData.best_bid,
+                            ask: objectData.best_ask,
+                        };
+                        console.log(newObject);
+                        // client.send(bufferOriginalData.toString('utf8'));
+                        client.send(JSON.stringify(newObject));
+                    }
+                });
+
+                dataSocket.on('close', () => {
+                    dataSocket.send(
+                        JSON.stringify({
+                            type: 'unsubscribe',
+                            channels: ['ticker'],
+                            product_ids: ['BTC-USD'],
+                        })
+                    );
+                    console.log('closed data server');
                 });
             }
         });
