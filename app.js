@@ -1,7 +1,8 @@
 const WebSocket = require('ws');
-require('dotenv').config();
 const CryptoJS = require('crypto-js');
 const express = require('express');
+require('dotenv').config();
+
 const SIGNING_KEY = process.env.API_SECRET;
 const API_KEY = process.env.API_KEY;
 const WEBSOCKET_URL = process.env.WEBSOCKET_URL;
@@ -10,13 +11,19 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 
 const wss = new WebSocket.Server({ noServer: true });
-// const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
 
 const CHANNEL_NAMES = {
     ticker: 'ticker',
     level2: 'level2',
     matches: 'matches',
 };
+
+const PRODUCT_CHOICES = ['BTC-USD', 'LTC-USD', 'XRP-USD', 'ETH-USD'];
+
+let PRODUCTS = [];
+let CHANNELS = [];
+let CONNECTIONS = [];
+let RATE_LIMIT = rateLimit(1, 250);
 
 function preSocketErrorHandler(error) {
     console.log(error);
@@ -49,6 +56,28 @@ function subscribeToProducts(products, channelName, ws) {
     ws.send(JSON.stringify(subscribeMsg));
 }
 
+function closeConnections() {
+    CONNECTIONS.forEach((ws) => ws.close());
+}
+
+// set a rate limit on messages coming in that can be sent back to the client
+function rateLimit(limit, interval) {
+    let now = 0;
+    const last = Symbol();
+    const count = Symbol();
+    setInterval(() => ++now, interval);
+
+    return (ws) => {
+        if (ws[last] != now) {
+            ws[last] = now;
+            ws[count] = 1;
+        } else {
+            return ++ws[count] > limit;
+        }
+    };
+}
+
+// not used but a function to unsubscribe if app was made a different way
 function unsubscribeToProducts(channels, ws) {
     ws.send(
         JSON.stringify({
@@ -67,11 +96,6 @@ function addChannelHandler(channelName) {
     }
 }
 
-let PRODUCTS = [];
-let CHANNELS = [];
-let CONNECTIONS = [];
-const PRODUCT_CHOICES = ['BTC-USD', 'LTC-USD', 'XRP-USD', 'ETH-USD'];
-
 // verify message is not already in products and
 // subscribe to correct view
 function verifyProductsSubscriptionHandler(message, socket) {
@@ -82,8 +106,15 @@ function verifyProductsSubscriptionHandler(message, socket) {
     // if the ticker is already in subscribed tickers return
 
     // return if system
-    if (messageString === 'SYSTEM') {
-        return;
+    if (messageString.includes('SYSTEM')) {
+        if (messageString === 'SYSTEM') {
+            return;
+        } else {
+            let number = messageString.slice(6);
+            console.log(+number);
+            RATE_LIMIT = rateLimit(1, number);
+            return subscribeToProducts(PRODUCTS, [CHANNELS[0]], socket);
+        }
     }
 
     // check if request is for matches channel
@@ -182,7 +213,7 @@ wss.on('connection', (ws, req) => {
                 dataSocket.on('open', () => {
                     if (msg.toString('utf8') === 'quit') {
                         // ws.close();
-                        CONNECTIONS.forEach((ws) => ws.close());
+                        closeConnections();
                         dataSocket.close();
                         PRODUCTS.length = 0;
                         console.log('connection closed with quit');
@@ -190,7 +221,7 @@ wss.on('connection', (ws, req) => {
                     }
 
                     if (msg.toString('utf8') === 'system') {
-                        CONNECTIONS.forEach((ws) => ws.close());
+                        closeConnections();
                         dataSocket.close();
                         client.send(
                             JSON.stringify({ product_ids_subscribed: PRODUCTS })
@@ -203,6 +234,8 @@ wss.on('connection', (ws, req) => {
                 });
 
                 dataSocket.on('message', (data) => {
+                    if (RATE_LIMIT(dataSocket)) return;
+
                     // convert data to object
                     let objectData = JSON.parse(data.toString('utf8'));
 
