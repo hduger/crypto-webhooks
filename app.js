@@ -12,6 +12,12 @@ const app = express();
 const wss = new WebSocket.Server({ noServer: true });
 // const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
 
+const CHANNEL_NAMES = {
+    ticker: 'ticker',
+    level2: 'level2',
+    matches: 'matches',
+};
+
 function preSocketErrorHandler(error) {
     console.log(error);
 }
@@ -43,7 +49,106 @@ function subscribeToProducts(products, channelName, ws) {
     ws.send(JSON.stringify(subscribeMsg));
 }
 
-const PRODUCTS = ['BTC-USD'];
+function unsubscribeToProducts(channels, ws) {
+    ws.send(
+        JSON.stringify({
+            type: 'unsubscribe',
+            channels: channels,
+            api_key: API_KEY,
+        })
+    );
+}
+
+// add channel if not already in channel list and remove other channels
+function addChannelHandler(channelName) {
+    if (!CHANNELS.includes(channelName)) {
+        CHANNELS.push(channelName);
+        CHANNELS = CHANNELS.filter((item) => item === channelName);
+    }
+}
+
+let PRODUCTS = [];
+let CHANNELS = [];
+let CONNECTIONS = [];
+const PRODUCT_CHOICES = ['BTC-USD', 'LTC-USD', 'XRP-USD', 'ETH-USD'];
+
+// verify message is not already in products and
+// subscribe to correct view
+function verifyProductsSubscriptionHandler(message, socket) {
+    // convert message data to string
+    let messageString = message.toString('utf8').trim().toUpperCase();
+    console.log(PRODUCTS);
+
+    // if the ticker is already in subscribed tickers return
+
+    // return if system
+    if (messageString === 'SYSTEM') {
+        return;
+    }
+
+    // check if request is for matches channel
+    if (messageString.charAt(messageString.length - 1) === 'M') {
+        messageString = messageString.slice(0, -1);
+        // if the message is in the product choices and not in products
+        // list then add it to the products list
+        if (
+            PRODUCT_CHOICES.includes(messageString) &&
+            !PRODUCTS.includes(messageString)
+        ) {
+            PRODUCTS.push(messageString);
+        }
+        // if matches channel is not in channel list then add it
+        addChannelHandler('matches');
+        return subscribeToProducts(PRODUCTS, [CHANNEL_NAMES.matches], socket);
+    }
+
+    if (messageString.charAt(messageString.length - 1) === 'U') {
+        messageString = messageString.slice(0, -1);
+
+        if (PRODUCTS.includes(messageString)) {
+            PRODUCTS = PRODUCTS.filter((item) => item !== messageString);
+            return subscribeToProducts(
+                PRODUCTS,
+                [CHANNEL_NAMES.matches],
+                socket
+            );
+        }
+    }
+
+    // enter if message string is in product choices
+    if (PRODUCT_CHOICES.includes(messageString)) {
+        // if product is not in products array add it
+        if (!PRODUCTS.includes(messageString)) {
+            PRODUCTS.push(messageString);
+        }
+        // if ticker channel is not in channel list then add it
+        addChannelHandler('ticker');
+        return subscribeToProducts(PRODUCTS, [CHANNEL_NAMES.ticker], socket);
+    }
+}
+
+function transformDataObject(object) {
+    let newObject;
+    if (object.type === 'ticker') {
+        newObject = {
+            product_id: object.product_id,
+            price: object.price,
+            bid: object.best_bid,
+            ask: object.best_ask,
+        };
+    }
+
+    if (object.type === 'match' || object.type === 'last_match') {
+        newObject = {
+            timestamp: object.time,
+            product_id: object.product_id,
+            trade_size: object.size,
+            price: object.price,
+        };
+    }
+
+    return newObject;
+}
 
 const server = app.listen(PORT, () => {
     console.log(`listening on *:${PORT}`);
@@ -59,71 +164,65 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws, req) => {
     ws.on('error', postSocketErrorHandler);
-    console.log('connection open');
+    console.log('wss connection open');
 
     ws.on('message', (msg, isBinary) => {
         wss.clients.forEach((client) => {
             if (ws === client && client.readyState === WebSocket.OPEN) {
                 // client.send(msg, { binary: isBinary });
+                // close all other websocket connections before opening new one
 
-                // convert message to string
-                let jsonMsg = JSON.stringify(msg);
-                let bufferOriginalMSG = Buffer.from(JSON.parse(jsonMsg).data);
-                console.log(bufferOriginalMSG.toString('utf8'));
-                PRODUCTS.push(bufferOriginalMSG.toString('utf8'));
+                // MAYBE SEE IF YOU CAN CHECK IF CONNECTIONS LENGTH IS NOT 0 AND THE USE THE WS CONNECTION IN THERE
+                CONNECTIONS.forEach((ws) => ws.close());
+                const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
+                CONNECTIONS.push(dataSocket);
+                // verifyProductsSubscriptionHandler(msg);
 
                 // connect to data websocket
-                const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
                 dataSocket.on('open', () => {
+                    if (msg.toString('utf8') === 'quit') {
+                        // ws.close();
+                        CONNECTIONS.forEach((ws) => ws.close());
+                        dataSocket.close();
+                        PRODUCTS.length = 0;
+                        console.log('connection closed with quit');
+                        client.send('quit');
+                    }
+
+                    if (msg.toString('utf8') === 'system') {
+                        CONNECTIONS.forEach((ws) => ws.close());
+                        dataSocket.close();
+                        client.send(
+                            JSON.stringify({ product_ids_subscribed: PRODUCTS })
+                        );
+                    }
                     console.log('opening data server');
-                    console.log(PRODUCTS);
-                    // dataSocket.send(
-                    //     JSON.stringify({
-                    //         type: 'subscribe',
-                    //         channels: ['ticker'],
-                    //         product_ids: ['BTC-USD'],
-                    //     })
-                    // );
-                    subscribeToProducts(PRODUCTS, ['ticker'], dataSocket);
+                    console.log(CHANNELS);
+                    // subscribeToProducts(PRODUCTS, ['matches'], dataSocket);
+                    verifyProductsSubscriptionHandler(msg, dataSocket);
                 });
 
                 dataSocket.on('message', (data) => {
-                    // convert data to string
-                    let jsonData = JSON.stringify(data);
-                    let bufferOriginalData = Buffer.from(
-                        JSON.parse(jsonData).data
-                    );
-                    let objectData = JSON.parse(
-                        bufferOriginalData.toString('utf8')
-                    );
-                    if (objectData.type === 'ticker') {
-                        let newObject = {
-                            product_id: objectData.product_id,
-                            price: objectData.price,
-                            bid: objectData.best_bid,
-                            ask: objectData.best_ask,
-                        };
-                        console.log(newObject);
-                        // client.send(bufferOriginalData.toString('utf8'));
-                        client.send(JSON.stringify(newObject));
-                    }
+                    // convert data to object
+                    let objectData = JSON.parse(data.toString('utf8'));
+
+                    // Function to transform object to correct output
+                    let newObject = transformDataObject(objectData);
+
+                    // client.send(JSON.stringify(objectData));
+                    client.send(JSON.stringify(newObject));
                 });
 
                 dataSocket.on('close', () => {
-                    dataSocket.send(
-                        JSON.stringify({
-                            type: 'unsubscribe',
-                            channels: ['ticker'],
-                            product_ids: ['BTC-USD'],
-                        })
-                    );
-                    console.log('closed data server');
+                    dataSocket.terminate();
+                    console.log('force closed data server');
                 });
             }
         });
     });
 
     ws.on('close', () => {
-        console.log('connection closed');
+        // ws.close();
+        console.log('wss connection closed');
     });
 });
