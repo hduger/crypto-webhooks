@@ -20,10 +20,10 @@ const CHANNEL_NAMES = {
 
 const PRODUCT_CHOICES = ['BTC-USD', 'LTC-USD', 'XRP-USD', 'ETH-USD'];
 
-let PRODUCTS = [];
+// let PRODUCTS = [];
 let CHANNELS = [];
-let CONNECTIONS = [];
-let RATE_LIMIT = rateLimit(1, 250);
+// let CONNECTIONS = [];
+// let RATE_LIMIT = rateLimit(1, 250);
 
 function preSocketErrorHandler(error) {
     console.log(error);
@@ -56,7 +56,7 @@ function subscribeToProducts(products, channelName, ws) {
     ws.send(JSON.stringify(subscribeMsg));
 }
 
-function closeConnections() {
+function closeConnections(CONNECTIONS) {
     CONNECTIONS.forEach((ws) => ws.close());
 }
 
@@ -98,7 +98,7 @@ function addChannelHandler(channelName) {
 
 // verify message is not already in products and
 // subscribe to correct view
-function verifyProductsSubscriptionHandler(message, socket) {
+function verifyProductsSubscriptionHandler(message, socket, PRODUCTS) {
     // convert message data to string
     let messageString = message.toString('utf8').trim().toUpperCase();
 
@@ -199,6 +199,11 @@ wss.on('connection', (ws, req) => {
     ws.on('error', postSocketErrorHandler);
     console.log('wss connection open');
 
+    // create for each connection
+    let PRODUCTS = [];
+    let CONNECTIONS = [];
+    let RATE_LIMIT = rateLimit(1, 250);
+
     ws.on('message', (msg, isBinary) => {
         wss.clients.forEach((client) => {
             if (ws === client && client.readyState === WebSocket.OPEN) {
@@ -211,7 +216,7 @@ wss.on('connection', (ws, req) => {
                 dataSocket.on('open', () => {
                     // close connections and socket if message is quit from client
                     if (msg.toString('utf8') === 'quit') {
-                        closeConnections();
+                        closeConnections(CONNECTIONS);
                         dataSocket.close();
                         PRODUCTS.length = 0;
                         console.log('connection closed with quit');
@@ -220,7 +225,7 @@ wss.on('connection', (ws, req) => {
 
                     // if message is system send the subscribed products and close connection so message doesn't get lost
                     if (msg.toString('utf8') === 'system') {
-                        closeConnections();
+                        closeConnections(CONNECTIONS);
                         dataSocket.close();
                         client.send(
                             JSON.stringify({ product_ids_subscribed: PRODUCTS })
@@ -229,7 +234,11 @@ wss.on('connection', (ws, req) => {
                     // logs for error handling
                     console.log('opening data server');
                     console.log(CHANNELS);
-                    verifyProductsSubscriptionHandler(msg, dataSocket);
+                    verifyProductsSubscriptionHandler(
+                        msg,
+                        dataSocket,
+                        PRODUCTS
+                    );
                 });
 
                 dataSocket.on('message', (data) => {
