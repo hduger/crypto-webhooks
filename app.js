@@ -101,17 +101,15 @@ function addChannelHandler(channelName) {
 function verifyProductsSubscriptionHandler(message, socket) {
     // convert message data to string
     let messageString = message.toString('utf8').trim().toUpperCase();
-    console.log(PRODUCTS);
 
-    // if the ticker is already in subscribed tickers return
-
-    // return if system
+    // check if rate limit needs to be changed
     if (messageString.includes('SYSTEM')) {
+        // return if just system else slice number from string
         if (messageString === 'SYSTEM') {
             return;
         } else {
+            // set rate limit
             let number = messageString.slice(6);
-            console.log(+number);
             RATE_LIMIT = rateLimit(1, number);
             return subscribeToProducts(PRODUCTS, [CHANNELS[0]], socket);
         }
@@ -133,9 +131,11 @@ function verifyProductsSubscriptionHandler(message, socket) {
         return subscribeToProducts(PRODUCTS, [CHANNEL_NAMES.matches], socket);
     }
 
+    // Check if message is for unsubscribing a symbol
     if (messageString.charAt(messageString.length - 1) === 'U') {
         messageString = messageString.slice(0, -1);
 
+        // if symbol is in products array filter it out and subscribe to the remaining symbols
         if (PRODUCTS.includes(messageString)) {
             PRODUCTS = PRODUCTS.filter((item) => item !== messageString);
             return subscribeToProducts(
@@ -158,14 +158,15 @@ function verifyProductsSubscriptionHandler(message, socket) {
     }
 }
 
+// transforming data so it displays as stated in exam instructions
 function transformDataObject(object) {
     let newObject;
     if (object.type === 'ticker') {
         newObject = {
             product_id: object.product_id,
             price: object.price,
-            bid: object.best_bid,
-            ask: object.best_ask,
+            best_bid: object.best_bid,
+            best_ask: object.best_ask,
         };
     }
 
@@ -185,6 +186,7 @@ const server = app.listen(PORT, () => {
     console.log(`listening on *:${PORT}`);
 });
 
+// once handshake is complete emit websocket server connection
 server.on('upgrade', (req, socket, head) => {
     socket.on('error', preSocketErrorHandler);
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -200,19 +202,15 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (msg, isBinary) => {
         wss.clients.forEach((client) => {
             if (ws === client && client.readyState === WebSocket.OPEN) {
-                // client.send(msg, { binary: isBinary });
                 // close all other websocket connections before opening new one
-
-                // MAYBE SEE IF YOU CAN CHECK IF CONNECTIONS LENGTH IS NOT 0 AND THE USE THE WS CONNECTION IN THERE
                 CONNECTIONS.forEach((ws) => ws.close());
                 const dataSocket = new WebSocket(`${WEBSOCKET_URL}`);
                 CONNECTIONS.push(dataSocket);
-                // verifyProductsSubscriptionHandler(msg);
 
-                // connect to data websocket
+                // open data websocket
                 dataSocket.on('open', () => {
+                    // close connections and socket if message is quit from client
                     if (msg.toString('utf8') === 'quit') {
-                        // ws.close();
                         closeConnections();
                         dataSocket.close();
                         PRODUCTS.length = 0;
@@ -220,6 +218,7 @@ wss.on('connection', (ws, req) => {
                         client.send('quit');
                     }
 
+                    // if message is system send the subscribed products and close connection so message doesn't get lost
                     if (msg.toString('utf8') === 'system') {
                         closeConnections();
                         dataSocket.close();
@@ -227,13 +226,14 @@ wss.on('connection', (ws, req) => {
                             JSON.stringify({ product_ids_subscribed: PRODUCTS })
                         );
                     }
+                    // logs for error handling
                     console.log('opening data server');
                     console.log(CHANNELS);
-                    // subscribeToProducts(PRODUCTS, ['matches'], dataSocket);
                     verifyProductsSubscriptionHandler(msg, dataSocket);
                 });
 
                 dataSocket.on('message', (data) => {
+                    // don't send messages that exceed rate limit
                     if (RATE_LIMIT(dataSocket)) return;
 
                     // convert data to object
@@ -248,14 +248,13 @@ wss.on('connection', (ws, req) => {
 
                 dataSocket.on('close', () => {
                     dataSocket.terminate();
-                    console.log('force closed data server');
+                    console.log('closed data server');
                 });
             }
         });
     });
 
     ws.on('close', () => {
-        // ws.close();
         console.log('wss connection closed');
     });
 });
