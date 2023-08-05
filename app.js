@@ -98,7 +98,12 @@ function addChannelHandler(channelName) {
 
 // verify message is not already in products and
 // subscribe to correct view
-function verifyProductsSubscriptionHandler(message, socket, PRODUCTS) {
+function verifyProductsSubscriptionHandler(
+    message,
+    socket,
+    PRODUCTS,
+    RATE_LIMIT
+) {
     // convert message data to string
     let messageString = message.toString('utf8').trim().toUpperCase();
 
@@ -224,20 +229,37 @@ wss.on('connection', (ws, req) => {
                     }
 
                     // if message is system send the subscribed products and close connection so message doesn't get lost
-                    if (msg.toString('utf8') === 'system') {
-                        closeConnections(CONNECTIONS);
-                        dataSocket.close();
-                        client.send(
-                            JSON.stringify({ product_ids_subscribed: PRODUCTS })
-                        );
+
+                    if (msg.toString('utf8').includes('system')) {
+                        // return if just system else slice number from string
+                        if (msg.toString('utf8') === 'system') {
+                            closeConnections(CONNECTIONS);
+                            dataSocket.close();
+                            client.send(
+                                JSON.stringify({
+                                    product_ids_subscribed: PRODUCTS,
+                                })
+                            );
+                        } else {
+                            // set rate limit
+                            let number = msg.toString('utf8').slice(6);
+                            RATE_LIMIT = rateLimit(1, number);
+                            return subscribeToProducts(
+                                PRODUCTS,
+                                [CHANNELS[0]],
+                                dataSocket
+                            );
+                        }
                     }
+
                     // logs for error handling
                     console.log('opening data server');
                     console.log(CHANNELS);
                     verifyProductsSubscriptionHandler(
                         msg,
                         dataSocket,
-                        PRODUCTS
+                        PRODUCTS,
+                        RATE_LIMIT
                     );
                 });
 
