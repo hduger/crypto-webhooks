@@ -108,17 +108,17 @@ function verifyProductsSubscriptionHandler(
     let messageString = message.toString('utf8').trim().toUpperCase();
 
     // check if rate limit needs to be changed
-    if (messageString.includes('SYSTEM')) {
-        // return if just system else slice number from string
-        if (messageString === 'SYSTEM') {
-            return;
-        } else {
-            // set rate limit
-            let number = messageString.slice(6);
-            RATE_LIMIT = rateLimit(1, number);
-            return subscribeToProducts(PRODUCTS, [CHANNELS[0]], socket);
-        }
-    }
+    // if (messageString.includes('SYSTEM')) {
+    //     // return if just system else slice number from string
+    //     if (messageString === 'SYSTEM') {
+    //         return;
+    //     } else {
+    //         // set rate limit
+    //         let number = messageString.slice(6);
+    //         RATE_LIMIT = rateLimit(1, number);
+    //         return subscribeToProducts(PRODUCTS, [CHANNELS[0]], socket);
+    //     }
+    // }
 
     // check if request is for matches channel
     if (messageString.charAt(messageString.length - 1) === 'M') {
